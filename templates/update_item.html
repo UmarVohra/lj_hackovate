@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Update Item{% endblock %}
+{% block content %}
+<h2>Update Item</h2>
+
+<form method="POST" enctype="multipart/form-data">
+    <input type="text" name="name" value="{{ item.name }}">
+    <br>
+    {% if item.image_filename %}
+        <p>Current Image:</p>
+        <img src="{{ url_for('static', filename='uploads/' ~ item.image_filename) }}" width="100">
+        <br>
+    {% endif %}
+    <input type="file" name="image">
+    <br><br>
+    <button type="submit">Update</button>
+</form>
+{% endblock %}

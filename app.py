@@ -1,5 +1,6 @@
 from flask import Flask
 from config import Config
+from flask_cors import CORS
 from extensions import db, bcrypt, login_manager
 from routes.authRoutes import auth
 from routes.crudRoutes import items
@@ -9,7 +10,7 @@ from models import User, Item
 
 app = Flask(__name__)
 app.config.from_object(Config)
-
+CORS(app)
 # Initialize extensions
 db.init_app(app)
 bcrypt.init_app(app)

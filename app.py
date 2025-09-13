@@ -4,6 +4,7 @@ from extensions import db, bcrypt, login_manager
 from routes.authRoutes import auth
 from routes.crudRoutes import items
 from routes.mainRoutes import main
+from routes.weatherRoutes import weather
 from models import User, Item
 
 app = Flask(__name__)
@@ -21,6 +22,7 @@ def load_user(user_id):
 # Register blueprints
 app.register_blueprint(auth, url_prefix="/auth")
 app.register_blueprint(items, url_prefix="/items")
+app.register_blueprint(weather)
 app.register_blueprint(main)
 
 if __name__ == "__main__":

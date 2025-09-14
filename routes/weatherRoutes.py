@@ -1,9 +1,54 @@
 from flask import Blueprint, jsonify, request, current_app
 import requests
 from datetime import datetime
+import torch
+import torch.nn as nn
+import pickle
+import numpy as np
+import pandas as pd
+import os
 
 weather = Blueprint("weather", __name__)
+# ---------------- PATHS ----------------
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+UTILS_DIR = os.path.join(BASE_DIR, "utilities")
 
+# ---------------- ML MODELS ----------------
+class LSTMClass(nn.Module):
+    def __init__(self, input_size=6, hidden=50, num_classes=3):
+        super().__init__()
+        self.lstm = nn.LSTM(input_size, hidden, batch_first=True)
+        self.fc = nn.Linear(hidden, num_classes)
+
+    def forward(self, x):
+        _, (hn, _) = self.lstm(x)
+        return self.fc(hn[-1])
+
+
+class LSTMReg(nn.Module):
+    def __init__(self, input_size=6, hidden=50):
+        super().__init__()
+        self.lstm = nn.LSTM(input_size, hidden, batch_first=True)
+        self.fc = nn.Linear(hidden, 1)
+
+    def forward(self, x):
+        _, (hn, _) = self.lstm(x)
+        return self.fc(hn[-1])
+
+
+# Load once (global)
+model_c = LSTMClass()
+model_c.load_state_dict(torch.load(os.path.join(UTILS_DIR, "lstm_class_multi.pth")))
+model_c.eval()
+
+model_r = LSTMReg()
+model_r.load_state_dict(torch.load(os.path.join(UTILS_DIR, "lstm_reg_multi.pth")))
+model_r.eval()
+
+scaler = pickle.load(open(os.path.join(UTILS_DIR, "scaler.pkl"), 'rb'))
+
+
+# ---------------- WEATHER API ----------------
 @weather.route("/api/weather", methods=["GET"])
 def get_weather():
     city = request.args.get("city", "Ahmedabad")
@@ -14,7 +59,6 @@ def get_weather():
     # Current weather
     current_url = f"{base_url}/weather?q={city}&appid={api_key}&units=metric"
     current_data = requests.get(current_url).json()
-
     if current_data.get("cod") != 200:
         return jsonify({"error": current_data.get("message", "Error fetching weather")}), 400
 
@@ -46,21 +90,56 @@ def get_weather():
             "temperature": {"min": v["min"], "max": v["max"]},
             "weather": v["weather"]
         }
-        for d, v in list(daily_forecast.items())[:5]  # only next 5 days
+        for d, v in list(daily_forecast.items())[:7]
     ]
 
+    # ---------------- ML Prediction ----------------
+    df = pd.read_csv(os.path.join(UTILS_DIR, "multi_city_labeled_fixed.csv"))
+    sample_data = df[df['city'] == city][['temperature_2m', 'relative_humidity_2m',
+                                          'pressure_msl', 'wind_speed_10m', 'precipitation']].tail(120).values
+
+    event_code = np.zeros((120, 1))
+    X = np.hstack((event_code, scaler.transform(sample_data)))
+    X_t = torch.tensor(X, dtype=torch.float32).unsqueeze(0)
+
+    with torch.no_grad():
+        probs = torch.softmax(model_c(X_t), dim=1).numpy()[0]
+        wind_pred = model_r(X_t).numpy().flatten()[0]
+
+    event = ['normal', 'wind', 'thunderstorm'][np.argmax(probs)]
+    reason = "High precip + humidity" if event == 'thunderstorm' else "High wind speed" if event == 'wind' else "Stable conditions"
+
+    # ---------------- Final Response ----------------
     response = {
-        "city": current_data["name"],
-        "current": {
-            "temperature": current_data["main"]["temp"],
-            "humidity": current_data["main"]["humidity"],
-            "wind_speed": current_data["wind"]["speed"],
-            "weather": current_data["weather"][0]["description"],
-            "aqi": "N/A",  # will add later from IQAir
-            "sunrise": datetime.fromtimestamp(current_data["sys"]["sunrise"]).strftime("%H:%M:%S"),
-            "sunset": datetime.fromtimestamp(current_data["sys"]["sunset"]).strftime("%H:%M:%S"),
-        },
-        "forecast": forecast_list
+    "city": current_data["name"],
+    "coordinates": {
+        "lat": current_data["coord"]["lat"],
+        "lon": current_data["coord"]["lon"]
+    },
+    "cities": ["Ahmedabad", "Delhi", "Mumbai", "Bangalore"],  # you had this list earlier
+    "current": {
+        "temperature": current_data["main"]["temp"],
+        "humidity": current_data["main"]["humidity"],
+        "wind_speed": current_data["wind"]["speed"],
+        "weather": current_data["weather"][0]["description"],
+        "aqi": "N/A",   # replace with AQI API if needed
+        "uv_index": "N/A",  # replace with OneCall if needed
+        "sunrise": datetime.fromtimestamp(current_data["sys"]["sunrise"]).strftime("%H:%M:%S"),
+        "sunset": datetime.fromtimestamp(current_data["sys"]["sunset"]).strftime("%H:%M:%S"),
+    },
+    "forecast": forecast_list,
+    "ml_prediction": {
+        "event": event,
+        "confidence": float(max(probs)),
+        "predicted_wind_speed": float(wind_pred),
+        "reason": reason,
+        "alert_class": (
+            "success" if event == "normal"
+            else "warning" if event == "wind"
+            else "danger"
+        )
     }
+}
+
 
     return jsonify(response)

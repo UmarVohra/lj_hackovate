@@ -48,10 +48,16 @@ model_r.eval()
 scaler = pickle.load(open(os.path.join(UTILS_DIR, "scaler.pkl"), 'rb'))
 
 
+
 # ---------------- WEATHER API ----------------
-@weather.route("/api/weather", methods=["GET"])
+@weather.route("/api/weather", methods=["GET", "POST"])
 def get_weather():
-    city = request.args.get("city", "Ahmedabad")
+    # ---- City input handling ----
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        city = data.get("city", "Ahmedabad")
+    else:  # GET request
+        city = request.args.get("city", "Ahmedabad")
 
     api_key = current_app.config["WEATHER_API_KEY"]
     base_url = current_app.config["WEATHER_BASE_URL"]
@@ -95,8 +101,18 @@ def get_weather():
 
     # ---------------- ML Prediction ----------------
     df = pd.read_csv(os.path.join(UTILS_DIR, "multi_city_labeled_fixed.csv"))
-    sample_data = df[df['city'] == city][['temperature_2m', 'relative_humidity_2m',
-                                          'pressure_msl', 'wind_speed_10m', 'precipitation']].tail(120).values
+    sample_data = df[df['city'] == city][[
+    'temperature_2m', 'relative_humidity_2m',
+    'pressure_msl', 'wind_speed_10m', 'precipitation'
+    ]]  # Agar empty hai -> fallback Ahmedabad
+
+    if sample_data.empty:
+        sample_data = df[df['city'] == "Ahmedabad"][[
+            'temperature_2m', 'relative_humidity_2m',
+            'pressure_msl', 'wind_speed_10m', 'precipitation'
+        ]]
+
+    sample_data = sample_data.tail(120).values
 
     event_code = np.zeros((120, 1))
     X = np.hstack((event_code, scaler.transform(sample_data)))
@@ -107,39 +123,40 @@ def get_weather():
         wind_pred = model_r(X_t).numpy().flatten()[0]
 
     event = ['normal', 'wind', 'thunderstorm'][np.argmax(probs)]
-    reason = "High precip + humidity" if event == 'thunderstorm' else "High wind speed" if event == 'wind' else "Stable conditions"
+    reason = "High precip + humidity" if event == 'thunderstorm' else \
+             "High wind speed" if event == 'wind' else \
+             "Stable conditions"
 
     # ---------------- Final Response ----------------
     response = {
-    "city": current_data["name"],
-    "coordinates": {
-        "lat": current_data["coord"]["lat"],
-        "lon": current_data["coord"]["lon"]
-    },
-    "cities": ["Ahmedabad", "Delhi", "Mumbai", "Bangalore"],  # you had this list earlier
-    "current": {
-        "temperature": current_data["main"]["temp"],
-        "humidity": current_data["main"]["humidity"],
-        "wind_speed": current_data["wind"]["speed"],
-        "weather": current_data["weather"][0]["description"],
-        "aqi": "N/A",   # replace with AQI API if needed
-        "uv_index": "N/A",  # replace with OneCall if needed
-        "sunrise": datetime.fromtimestamp(current_data["sys"]["sunrise"]).strftime("%H:%M:%S"),
-        "sunset": datetime.fromtimestamp(current_data["sys"]["sunset"]).strftime("%H:%M:%S"),
-    },
-    "forecast": forecast_list,
-    "ml_prediction": {
-        "event": event,
-        "confidence": float(max(probs)),
-        "predicted_wind_speed": float(wind_pred),
-        "reason": reason,
-        "alert_class": (
-            "success" if event == "normal"
-            else "warning" if event == "wind"
-            else "danger"
-        )
+        "city": current_data["name"],
+        "coordinates": {
+            "lat": current_data["coord"]["lat"],
+            "lon": current_data["coord"]["lon"]
+        },
+        "cities": ["Ahmedabad", "Delhi", "Mumbai", "Bangalore"],
+        "current": {
+            "temperature": current_data["main"]["temp"],
+            "humidity": current_data["main"]["humidity"],
+            "wind_speed": current_data["wind"]["speed"],
+            "weather": current_data["weather"][0]["description"],
+            "aqi": "N/A",
+            "uv_index": "N/A",
+            "sunrise": datetime.fromtimestamp(current_data["sys"]["sunrise"]).strftime("%H:%M:%S"),
+            "sunset": datetime.fromtimestamp(current_data["sys"]["sunset"]).strftime("%H:%M:%S"),
+        },
+        "forecast": forecast_list,
+        "ml_prediction": {
+            "event": event,
+            "confidence": float(max(probs)),
+            "predicted_wind_speed": float(wind_pred),
+            "reason": reason,
+            "alert_class": (
+                "success" if event == "normal"
+                else "warning" if event == "wind"
+                else "danger"
+            )
+        }
     }
-}
-
 
     return jsonify(response)

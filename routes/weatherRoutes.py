@@ -68,6 +68,8 @@ def get_weather():
     if current_data.get("cod") != 200:
         return jsonify({"error": current_data.get("message", "Error fetching weather")}), 400
 
+    
+    
     # Forecast (5-day / 3-hour)
     forecast_url = f"{base_url}/forecast?q={city}&appid={api_key}&units=metric"
     forecast_data = requests.get(forecast_url).json()
@@ -127,6 +129,22 @@ def get_weather():
              "High wind speed" if event == 'wind' else \
              "Stable conditions"
 
+    # --- AQI ---
+    aqi_url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={current_data['coord']['lat']}&lon={current_data['coord']['lon']}&appid={api_key}"
+    aqi_data = requests.get(aqi_url).json()
+    aqi_value = aqi_data.get("list", [{}])[0].get("main", {}).get("aqi", "N/A")
+    def get_uv_index(lat, lon, uv_token):
+        url = "https://api.openuv.io/api/v1/uv"
+        headers = {"x-access-token": uv_token}
+        params = {"lat": lat, "lng": lon}
+        res = requests.get(url, headers=headers, params=params).json()
+        return res.get("result", {}).get("uv", "N/A")
+    uv_token = current_app.config.get("UV_API_KEY")
+    uv_value = get_uv_index(
+    current_data["coord"]["lat"],
+    current_data["coord"]["lon"],
+    uv_token
+)
     # ---------------- Final Response ----------------
     response = {
         "city": current_data["name"],
@@ -140,8 +158,8 @@ def get_weather():
             "humidity": current_data["main"]["humidity"],
             "wind_speed": current_data["wind"]["speed"],
             "weather": current_data["weather"][0]["description"],
-            "aqi": "N/A",
-            "uv_index": "N/A",
+            "aqi": aqi_value,
+            "uv_index":uv_value,
             "sunrise": datetime.fromtimestamp(current_data["sys"]["sunrise"]).strftime("%H:%M:%S"),
             "sunset": datetime.fromtimestamp(current_data["sys"]["sunset"]).strftime("%H:%M:%S"),
         },

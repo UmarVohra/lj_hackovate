@@ -85,10 +85,44 @@ curl "http://localhost:5000/api/weather?city=Ahmedabad"
 }
 ```
 
+
 ## ML Models
-- LSTM-based classification and regression models (PyTorch)
-- Trained on multi-city weather data (`multi_city_labeled_fixed.csv`)
-- Scaler and models are loaded from the `utilities/` folder
+
+This project uses two custom PyTorch LSTM models for weather event prediction:
+
+- **LSTMClass**: A classification model that predicts the probability of three weather events: `normal`, `wind`, and `thunderstorm`.
+- **LSTMReg**: A regression model that predicts the next wind speed value.
+
+### Model Architecture
+- Both models use an LSTM layer with 6 input features and a hidden size of 50.
+- The classifier outputs 3 classes, while the regressor outputs a single value.
+
+### Input Features
+- `temperature_2m`
+- `relative_humidity_2m`
+- `pressure_msl`
+- `wind_speed_10m`
+- `precipitation`
+- `event_code` (for sequence context)
+
+### Training Data
+- Models are trained on the `multi_city_labeled_fixed.csv` dataset, which contains historical weather data for multiple Indian cities.
+- The data is preprocessed and scaled using a fitted scaler (`scaler.pkl`).
+
+### Model Files
+- `utilities/lstm_class_multi.pth`: Weights for the classification model
+- `utilities/lstm_reg_multi.pth`: Weights for the regression model
+- `utilities/scaler.pkl`: Scaler for input normalization
+
+### Usage in API
+- On each API call, the latest 120 data points for the selected city are preprocessed and passed to the models.
+- The classifier predicts the most likely weather event and its confidence.
+- The regressor predicts the next wind speed value.
+
+### Extending/Updating Models
+- To retrain or update the models, use the same data format and update the `.pth` and `.pkl` files in the `utilities/` folder.
+
+For more details, see the model loading and inference code in `routes/weatherRoutes.py`.
 
 ## Extending
 - Add more cities/data to `multi_city_labeled_fixed.csv`
@@ -96,4 +130,4 @@ curl "http://localhost:5000/api/weather?city=Ahmedabad"
 - Add new endpoints in `routes/`
 
 ## License
-MIT License
+MIT License 
